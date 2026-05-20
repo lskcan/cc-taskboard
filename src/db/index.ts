@@ -86,7 +86,7 @@ export function upsertTask(db: Database.Database, task: Partial<Task> & { id: st
       output = COALESCE(@output, output)
   `).run({
     id: task.id,
-    subject: task.subject ?? '',
+    subject: task.subject ?? null,
     description: task.description ?? null,
     status: task.status ?? 'pending',
     session_id: task.session_id,
@@ -111,6 +111,22 @@ export function getAllTasks(db: Database.Database): Task[] {
 
 export function getAllSessions(db: Database.Database): AgentSession[] {
   return db.prepare('SELECT * FROM agent_sessions ORDER BY spawned_at DESC').all() as AgentSession[];
+}
+
+export function updateTaskStatus(
+  db: Database.Database,
+  id: string,
+  fields: { status?: string; output?: string; session_id?: string }
+): void {
+  const sets: string[] = ['updated_at = @now'];
+  if (fields.status !== undefined) sets.push('status = @status');
+  if (fields.output !== undefined) sets.push('output = @output');
+  db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = @id`).run({
+    id,
+    now: Date.now(),
+    status: fields.status ?? null,
+    output: fields.output ?? null,
+  });
 }
 
 export function clearAll(db: Database.Database): void {

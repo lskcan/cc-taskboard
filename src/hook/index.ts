@@ -1,4 +1,4 @@
-import { getDb, upsertTask, upsertSession } from '../db/index.js';
+import { getDb, upsertTask, upsertSession, updateTaskStatus } from '../db/index.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -67,24 +67,20 @@ async function main(): Promise<void> {
         upsertSession(db, { session_id: sessionId, parent_session_id: null, description: null, spawned_at: now });
       }
     } else if (toolName === 'TaskUpdate') {
-      const taskId = (toolInput?.task_id ?? toolInput?.id) as string | undefined;
+      const taskId = (toolInput?.taskId ?? toolInput?.task_id ?? toolInput?.id) as string | undefined;
       if (taskId) {
-        upsertTask(db, {
-          id: String(taskId),
-          session_id: sessionId,
-          status: (toolInput?.status as Task['status']) ?? undefined,
-        });
+        updateTaskStatus(db, String(taskId), { status: toolInput?.status as string | undefined });
       }
     } else if (toolName === 'TaskStop') {
-      const taskId = (toolInput?.task_id ?? toolInput?.id) as string | undefined;
+      const taskId = (toolInput?.taskId ?? toolInput?.task_id ?? toolInput?.id) as string | undefined;
       if (taskId) {
-        upsertTask(db, { id: String(taskId), session_id: sessionId, status: 'completed' });
+        updateTaskStatus(db, String(taskId), { status: 'completed' });
       }
     } else if (toolName === 'TaskOutput') {
-      const taskId = (toolInput?.task_id ?? toolInput?.id) as string | undefined;
+      const taskId = (toolInput?.taskId ?? toolInput?.task_id ?? toolInput?.id) as string | undefined;
       const output = (toolInput?.output ?? toolResponse?.output) as string | undefined;
       if (taskId) {
-        upsertTask(db, { id: String(taskId), session_id: sessionId, output: output ?? null });
+        updateTaskStatus(db, String(taskId), { output });
       }
     } else if (toolName === 'Agent') {
       // Child agent spawned: tool_response may contain the child's session_id
