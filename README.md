@@ -1,70 +1,149 @@
 # cc-taskboard
 
-Claude Code Agent 任务看板 — 实时可视化多 Agent 任务执行。
+**Real-time task board for Claude Code's multi-agent execution.**
 
-当 Claude Code 指派多个 Agent 协作完成任务时，看板显示：
-- 哪个 Agent（数字员工）负责哪个 Task
-- 任务状态（Pending / In Progress / Done）
-- Agent 派发关系（谁派发了谁）
+When Claude Code spawns multiple agents to work in parallel, you get... nothing. Just a wall of text. `cc-taskboard` fixes that — it gives you a live kanban showing exactly which agent is running which task, who spawned whom, and what's done.
 
-## 安装
+![Status](https://img.shields.io/badge/status-alpha-orange) ![License](https://img.shields.io/badge/license-MIT-blue) ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
 
-**Step 1：注册 MCP Server**
+---
+
+## What it looks like
+
+```
+┌─ Agent: 77ab27ff ─────────────────────────────────────┐
+│  ↳ spawned by: main session                            │
+│                                                        │
+│  [in progress]  Implement auth module                  │
+│  [completed]    Write unit tests                       │
+└────────────────────────────────────────────────────────┘
+
+┌─ Agent: 3c9f12aa ─────────────────────────────────────┐
+│  ↳ spawned by: 77ab27ff                                │
+│                                                        │
+│  [pending]      Review PR diff                         │
+└────────────────────────────────────────────────────────┘
+```
+
+Live in your browser. Updates the moment a task changes.
+
+---
+
+## Install
+
+Two steps. Takes 30 seconds.
+
+**Step 1 — Register the MCP server:**
 
 ```bash
 claude mcp add cc-taskboard --command "npx -y cc-taskboard"
 ```
 
-**Step 2：安装 Hook**（自动修改 Claude Code settings.json）
+**Step 2 — Install the hook** (auto-writes to Claude Code's settings.json):
 
 ```bash
 npx cc-taskboard install-hook
 ```
 
-重启 Claude Code 后生效。
+Restart Claude Code. That's it.
 
-## 使用
+---
 
-Claude Code 里输入：
+## Usage
+
+Inside Claude Code, type:
 
 ```
 /board
 ```
 
-自动打开浏览器看板。任务状态实时更新。
+Your browser opens to the live kanban. Every task update from every agent shows up in real time — no refresh needed.
 
-也可以用 MCP 工具：
+**MCP tools also available:**
 
-- `get_board_url` — 获取看板 URL
-- `get_tasks` — 获取当前任务列表 (JSON)
-- `clear_history` — 清空历史记录
+| Tool | What it does |
+|------|-------------|
+| `get_board_url` | Get the current board URL |
+| `get_tasks` | Fetch full task + agent data as JSON |
+| `clear_history` | Wipe the board |
 
-## 开发
+---
 
-```bash
-git clone https://github.com/YOUR_USERNAME/cc-taskboard
-cd cc-taskboard
-npm install
-npm run dev   # 启动 MCP server
+## How it works
+
+Claude Code's `PostToolUse` hook fires every time an agent calls `TaskCreate`, `TaskUpdate`, `TaskStop`, or `Agent`. cc-taskboard intercepts those events and writes them to a local SQLite database. The MCP server reads from that database and pushes updates to the browser via WebSocket.
+
+```
+Claude Code agents
+      │
+      │ PostToolUse hook (fires on Task* + Agent calls)
+      ▼
+  hook script ──► SQLite (WAL mode) ◄── MCP Server
+                                              │
+                                        WebSocket push
+                                              │
+                                         Browser UI
+                                     (swim-lane kanban)
 ```
 
-## 技术栈
+Everything runs locally. No data leaves your machine.
 
-- **MCP SDK**: `@modelcontextprotocol/sdk`
-- **DB**: `better-sqlite3` (WAL 模式)
-- **实时**: WebSocket (`ws`)
-- **Web UI**: 内嵌单页 HTML（无外部依赖）
-- **Hook**: TypeScript via `tsx`
+**Spike result:** Claude Code's hook payload reliably includes `session_id` — this is how we track which agent owns which task, and reconstruct the spawn tree.
 
-## Spike 验证结果
+---
 
-Claude Code PostToolUse hook payload 包含：
-- `session_id` — 当前 Agent 的会话 ID ✅
-- `tool_name` — 工具名称
-- `tool_input` + `tool_response` — 完整输入输出
+## Dev setup
 
-Agent 派发关系通过 `Agent` 工具的 hook 捕获。
+```bash
+git clone https://github.com/lskcan/cc-taskboard
+cd cc-taskboard
+npm install
+npm run dev        # start MCP server (port 8472)
+```
+
+To test the hook manually:
+
+```bash
+echo '{"session_id":"test","tool_name":"TaskCreate","tool_input":{"subject":"hello"},"tool_response":{"task":{"id":"1","subject":"hello"}}}' \
+  | npm run hook
+```
+
+---
+
+## Stack
+
+- [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) — MCP server
+- [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — local storage, WAL mode
+- [`ws`](https://github.com/websockets/ws) — WebSocket for real-time push
+- Zero frontend dependencies — the UI is a single self-contained HTML file
+
+---
+
+## Roadmap
+
+- [x] Hook → SQLite pipeline
+- [x] MCP server + Web UI
+- [x] Swim-lane kanban by agent
+- [x] Real-time WebSocket updates
+- [x] `/board` slash command
+- [ ] Agent dependency tree (DAG view)
+- [ ] Task timeline view
+- [ ] npm publish
+
+---
+
+## Why this exists
+
+Claude Code's multi-agent mode is powerful but invisible. You kick off a task, agents get spawned, subtasks get created — and you have no idea what's happening until it's done (or broken). This tool makes the execution visible.
+
+If you're using Claude Code for serious multi-agent workflows, you want this.
+
+---
 
 ## License
 
-MIT
+MIT — use it, fork it, build on it.
+
+---
+
+If this is useful, a ⭐ helps others find it.
