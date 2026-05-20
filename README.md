@@ -31,7 +31,7 @@ Live in your browser. Updates the moment a task changes.
 
 ## Install
 
-Two steps. Takes 30 seconds.
+Three steps. Takes 60 seconds.
 
 **Step 1 — Register the MCP server:**
 
@@ -43,6 +43,14 @@ claude mcp add cc-taskboard --command "npx -y cc-taskboard"
 
 ```bash
 npx cc-taskboard install-hook
+```
+
+**Step 3 — Add the `/board` slash command globally:**
+
+```bash
+mkdir -p ~/.claude/commands
+curl -s https://raw.githubusercontent.com/lskcan/cc-taskboard/main/.claude/commands/board.md \
+  -o ~/.claude/commands/board.md
 ```
 
 Restart Claude Code. That's it.
