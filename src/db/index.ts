@@ -39,6 +39,16 @@ function initSchema(db: Database.Database): void {
       spawned_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_id TEXT PRIMARY KEY,
+      parent_session_id TEXT,
+      prompt TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      tool_call_count INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -50,6 +60,7 @@ function initSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
   `);
 }
@@ -111,6 +122,61 @@ export function getAllTasks(db: Database.Database): Task[] {
 
 export function getAllSessions(db: Database.Database): AgentSession[] {
   return db.prepare('SELECT * FROM agent_sessions ORDER BY spawned_at DESC').all() as AgentSession[];
+}
+
+export interface Session {
+  session_id: string;
+  parent_session_id: string | null;
+  prompt: string | null;
+  status: 'active' | 'completed';
+  tool_call_count: number;
+  started_at: number;
+  completed_at: number | null;
+}
+
+export function upsertSession2(db: Database.Database, s: {
+  session_id: string;
+  parent_session_id?: string | null;
+  prompt?: string | null;
+}): void {
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO sessions (session_id, parent_session_id, prompt, status, tool_call_count, started_at)
+    VALUES (@session_id, @parent_session_id, @prompt, 'active', 0, @now)
+    ON CONFLICT(session_id) DO UPDATE SET
+      prompt = COALESCE(@prompt, prompt),
+      parent_session_id = COALESCE(@parent_session_id, parent_session_id)
+  `).run({ session_id: s.session_id, parent_session_id: s.parent_session_id ?? null, prompt: s.prompt ?? null, now });
+}
+
+export function incrementToolCall(db: Database.Database, session_id: string, tool_name: string): void {
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO sessions (session_id, parent_session_id, prompt, status, tool_call_count, started_at)
+    VALUES (@session_id, NULL, NULL, 'active', 1, @now)
+    ON CONFLICT(session_id) DO UPDATE SET
+      tool_call_count = tool_call_count + 1
+  `).run({ session_id, now });
+  db.prepare(`
+    INSERT INTO events (session_id, tool_name, ts) VALUES (?, ?, ?)
+  `).run(session_id, tool_name, now);
+}
+
+export function completeSession(db: Database.Database, session_id: string): void {
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO sessions (session_id, parent_session_id, prompt, status, tool_call_count, started_at, completed_at)
+    VALUES (@session_id, NULL, NULL, 'completed', 0, @now, @now)
+    ON CONFLICT(session_id) DO UPDATE SET
+      status = 'completed',
+      completed_at = @now
+  `).run({ session_id, now });
+}
+
+export function getAllSessions2(db: Database.Database): Session[] {
+  return db.prepare(`
+    SELECT * FROM sessions ORDER BY started_at DESC LIMIT 100
+  `).all() as Session[];
 }
 
 export function updateTaskStatus(

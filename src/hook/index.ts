@@ -1,4 +1,4 @@
-import { getDb, upsertTask, upsertSession, updateTaskStatus } from '../db/index.js';
+import { getDb, upsertTask, upsertSession, updateTaskStatus, upsertSession2, incrementToolCall, completeSession } from '../db/index.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -44,7 +44,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const toolName = payload.tool_name as string;
+  const eventName = payload.hook_event_name as string;
+  const toolName = (payload.tool_name as string) ?? '';
   const sessionId = payload.session_id as string;
   const toolInput = payload.tool_input as Record<string, unknown> | undefined;
   const toolResponse = payload.tool_response as Record<string, unknown> | undefined;
@@ -52,6 +53,30 @@ async function main(): Promise<void> {
 
   try {
     const db = getDb();
+
+    // Session-level events (Direction A)
+    if (eventName === 'UserPromptSubmit') {
+      const prompt = (payload.prompt as string) ?? null;
+      const parentSessionId = (payload.parent_session_id as string) ?? null;
+      upsertSession2(db, {
+        session_id: sessionId,
+        parent_session_id: parentSessionId,
+        prompt: prompt ? prompt.slice(0, 200) : null,
+      });
+      notifyServer({ event: 'session_start', session_id: sessionId });
+      process.exit(0);
+    }
+
+    if (eventName === 'Stop' || eventName === 'SubagentStop') {
+      completeSession(db, sessionId);
+      notifyServer({ event: 'session_stop', session_id: sessionId });
+      process.exit(0);
+    }
+
+    // Tool-level tracking: count every tool call per session
+    if (eventName === 'PostToolUse' && toolName) {
+      incrementToolCall(db, sessionId, toolName);
+    }
 
     if (toolName === 'TaskCreate') {
       const task = toolResponse?.task as { id: string; subject: string } | undefined;

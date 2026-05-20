@@ -8,7 +8,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { getDb, getAllTasks, getAllSessions, clearAll } from '../db/index.js';
+import { getDb, getAllTasks, getAllSessions, getAllSessions2, clearAll } from '../db/index.js';
 
 const DATA_DIR = path.join(os.homedir(), '.cc-taskboard');
 const PORT_FILE = path.join(DATA_DIR, 'port');
@@ -55,7 +55,7 @@ function startNotificationListener(port: number): void {
           const db = getDb();
           const tasks = getAllTasks(db);
           const sessions = getAllSessions(db);
-          broadcast({ type: 'update', tasks, sessions });
+          broadcast({ type: 'update', tasks, sessions, sessions2: getAllSessions2(db) });
         } catch {}
         buf = '';
       }
@@ -96,11 +96,20 @@ function getWebUiHtml(wsPort: number): string {
   .badge.pending { background: #1e293b; color: #64748b; }
   .badge.in_progress { background: #1c3a5e; color: #60a5fa; }
   .badge.completed { background: #14532d; color: #4ade80; }
+  .badge.active { background: #1c3a5e; color: #60a5fa; }
   .badge.failed { background: #450a0a; color: #f87171; }
   .lane { background: #161616; border: 1px solid #222; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
-  .lane-header { font-size: 11px; color: #888; margin-bottom: 10px; display: flex; align-items: center; gap-8px; }
-  .lane-id { font-family: monospace; font-size: 10px; color: #444; margin-top: 2px; }
+  .lane-header { font-size: 11px; color: #888; margin-bottom: 10px; }
   .empty { color: #333; font-size: 12px; text-align: center; padding: 40px 0; }
+  .tabs { display: flex; gap: 4px; padding: 12px 24px 0; border-bottom: 1px solid #1e1e1e; }
+  .tab { font-size: 12px; padding: 6px 14px; border-radius: 6px 6px 0 0; cursor: pointer; color: #555; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; }
+  .tab.active { color: #e0e0e0; background: #161616; border-color: #2a2a2a; }
+  .session-card { background: #161616; border: 1px solid #222; border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; }
+  .session-prompt { font-size: 13px; color: #ccc; margin-bottom: 8px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+  .session-meta { display: flex; gap: 12px; align-items: center; font-size: 11px; color: #555; flex-wrap: wrap; }
+  .session-tools { font-family: monospace; }
+  .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #60a5fa; margin-right: 5px; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 </style>
 </head>
 <body>
@@ -109,22 +118,72 @@ function getWebUiHtml(wsPort: number): string {
   <h1>CC TaskBoard</h1>
   <span id="status">Connecting...</span>
 </header>
-<div class="board" id="board">
-  <div class="empty">Waiting for tasks...</div>
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('sessions')" id="tab-sessions">会话</div>
+  <div class="tab" onclick="switchTab('tasks')" id="tab-tasks">结构化任务</div>
+</div>
+<div id="view-sessions" style="padding:20px 24px">
+  <div class="empty">等待新的 Claude Code 会话...</div>
+</div>
+<div id="view-tasks" style="display:none">
+  <div class="board" id="board">
+    <div class="empty">等待任务...</div>
+  </div>
 </div>
 <script>
 const WS_PORT = ${wsPort};
 let ws;
+let currentTab = 'sessions';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('view-sessions').style.display = tab === 'sessions' ? '' : 'none';
+  document.getElementById('view-tasks').style.display = tab === 'tasks' ? '' : 'none';
+  document.getElementById('tab-sessions').className = 'tab' + (tab === 'sessions' ? ' active' : '');
+  document.getElementById('tab-tasks').className = 'tab' + (tab === 'tasks' ? ' active' : '');
+}
 
 function shortId(id) {
   return id ? id.slice(0, 8) : '?';
 }
 
 function timeAgo(ms) {
+  if (!ms) return '—';
   const s = Math.floor((Date.now() - ms) / 1000);
   if (s < 60) return s + 's ago';
   if (s < 3600) return Math.floor(s/60) + 'm ago';
   return Math.floor(s/3600) + 'h ago';
+}
+
+function duration(start, end) {
+  if (!start) return '—';
+  const ms = (end || Date.now()) - start;
+  if (ms < 60000) return Math.floor(ms/1000) + 's';
+  return Math.floor(ms/60000) + 'm' + Math.floor((ms%60000)/1000) + 's';
+}
+
+function renderSessions(sessions2) {
+  const el = document.getElementById('view-sessions');
+  if (!sessions2 || !sessions2.length) {
+    el.innerHTML = '<div class="empty">暂无会话记录。<br>在任意 Claude Code 窗口发消息后会自动出现。</div>';
+    return;
+  }
+  el.innerHTML = sessions2.map(s => {
+    const isActive = s.status === 'active';
+    const promptText = s.prompt ? s.prompt.replace(/</g,'&lt;').replace(/>/g,'&gt;') : '（无提示词记录）';
+    return \`
+      <div class="session-card">
+        <div class="session-prompt">\${isActive ? '<span class="pulse"></span>' : ''}\${promptText}</div>
+        <div class="session-meta">
+          <span class="badge \${s.status}">\${s.status === 'active' ? '进行中' : '已完成'}</span>
+          <span class="session-tools">🔧 \${s.tool_call_count} 次工具调用</span>
+          <span>⏱ \${duration(s.started_at, s.completed_at)}</span>
+          <span style="font-family:monospace;color:#333">\${shortId(s.session_id)}</span>
+          \${s.parent_session_id ? '<span style="color:#333">↳ 子 Agent</span>' : ''}
+        </div>
+      </div>
+    \`;
+  }).join('');
 }
 
 function render(tasks, sessions) {
@@ -243,6 +302,7 @@ function connect() {
       const d = JSON.parse(e.data);
       if (d.type === 'update' || d.type === 'state') {
         render(d.tasks || [], d.sessions || []);
+        renderSessions(d.sessions2 || []);
       }
     } catch {}
   };
@@ -277,13 +337,19 @@ async function startWebServer(): Promise<number> {
       type: 'state',
       tasks: getAllTasks(db),
       sessions: getAllSessions(db),
+      sessions2: getAllSessions2(db),
     }));
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
         if (msg.type === 'get_state') {
           const db2 = getDb();
-          ws.send(JSON.stringify({ type: 'state', tasks: getAllTasks(db2), sessions: getAllSessions(db2) }));
+          ws.send(JSON.stringify({
+            type: 'state',
+            tasks: getAllTasks(db2),
+            sessions: getAllSessions(db2),
+            sessions2: getAllSessions2(db2),
+          }));
         }
       } catch {}
     });
