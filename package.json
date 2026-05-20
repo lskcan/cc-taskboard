@@ -1,0 +1,30 @@
+{
+  "name": "cc-taskboard",
+  "version": "0.1.0",
+  "description": "Claude Code Agent Task Board — visualize multi-agent task execution",
+  "main": "dist/mcp/index.js",
+  "bin": {
+    "cc-taskboard": "./dist/mcp/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/mcp/index.ts",
+    "hook": "tsx src/hook/index.ts",
+    "install-hook": "tsx src/cli/install-hook.ts",
+    "build": "tsc"
+  },
+  "keywords": ["claude-code", "mcp", "agent", "taskboard"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.10.0",
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.9.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
+  }
+}
